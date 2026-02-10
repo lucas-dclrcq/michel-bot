@@ -285,9 +285,6 @@ async fn seerr_sends_webhook(world: &mut TestWorld, step: &Step, notification_ty
         "Webhook returned error: {}",
         resp.status()
     );
-
-    // Give Matrix time to process the message
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 }
 
 // -- Then steps --
@@ -296,6 +293,32 @@ async fn seerr_sends_webhook(world: &mut TestWorld, step: &Step, notification_ty
 #[then(regex = r#"^a message appears in "[^"]*" containing "([^"]*)"$"#)]
 async fn message_appears_containing(world: &mut TestWorld, expected_text: String) {
     let http = http_client();
+    let synapse_port = world.synapse_port;
+    let token = world.observer_access_token.clone();
+    let room_id = world.room_id.clone();
+    let text = expected_text.clone();
+
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!("message containing '{text}' to appear"))
+        .until_async(|| {
+            let http = http_client();
+            let token = token.clone();
+            let room_id = room_id.clone();
+            let text = text.clone();
+            async move {
+                let messages =
+                    world::sync_and_find_messages(&http, synapse_port, &token, &room_id).await;
+                messages.iter().any(|msg| {
+                    let body = msg["content"]["body"].as_str().unwrap_or("");
+                    let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
+                    body.contains(&text) || formatted.contains(&text)
+                })
+            }
+        })
+        .await;
+
+    // Fetch once more to capture the event_id
     let messages = world::sync_and_find_messages(
         &http,
         world.synapse_port,
@@ -309,16 +332,6 @@ async fn message_appears_containing(world: &mut TestWorld, expected_text: String
         let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
         body.contains(&expected_text) || formatted.contains(&expected_text)
     });
-
-    assert!(
-        found.is_some(),
-        "No message containing '{}' found in room. Messages: {:?}",
-        expected_text,
-        messages
-            .iter()
-            .map(|m| m["content"]["body"].as_str().unwrap_or(""))
-            .collect::<Vec<_>>()
-    );
 
     // Store the event ID of the found message as the root for thread assertions
     if let Some(msg) = found {
@@ -356,46 +369,56 @@ async fn the_message_contains(world: &mut TestWorld, expected_text: String) {
 #[then(regex = r#"^a threaded reply appears on the original message containing "([^"]*)"$"#)]
 async fn threaded_reply_appears(world: &mut TestWorld, expected_text: String) {
     let http = http_client();
+    let synapse_port = world.synapse_port;
+    let token = world.observer_access_token.clone();
+    let room_id = world.room_id.clone();
+    let root_event_id = world.last_root_event_id.clone();
+    let text = expected_text.clone();
 
-    let mut thread_messages = Vec::new();
-    for _ in 0..10 {
-        thread_messages = world::get_relations(
-            &http,
-            world.synapse_port,
-            &world.observer_access_token,
-            &world.room_id,
-            &world.last_root_event_id,
-            "m.thread",
-        )
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!("threaded reply containing '{text}'"))
+        .until_async(|| {
+            let http = http_client();
+            let token = token.clone();
+            let room_id = room_id.clone();
+            let root_event_id = root_event_id.clone();
+            let text = text.clone();
+            async move {
+                let thread_messages = world::get_relations(
+                    &http,
+                    synapse_port,
+                    &token,
+                    &room_id,
+                    &root_event_id,
+                    "m.thread",
+                )
+                .await;
+                thread_messages.iter().any(|msg| {
+                    let body = msg["content"]["body"].as_str().unwrap_or("");
+                    let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
+                    body.contains(&text) || formatted.contains(&text)
+                })
+            }
+        })
         .await;
 
-        let found = thread_messages.iter().any(|msg| {
-            let body = msg["content"]["body"].as_str().unwrap_or("");
-            let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
-            body.contains(&expected_text) || formatted.contains(&expected_text)
-        });
-
-        if found {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    // Fetch once more to capture the event_id
+    let thread_messages = world::get_relations(
+        &http,
+        world.synapse_port,
+        &world.observer_access_token,
+        &world.room_id,
+        &world.last_root_event_id,
+        "m.thread",
+    )
+    .await;
 
     let found = thread_messages.iter().find(|msg| {
         let body = msg["content"]["body"].as_str().unwrap_or("");
         let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
         body.contains(&expected_text) || formatted.contains(&expected_text)
     });
-
-    assert!(
-        found.is_some(),
-        "No threaded reply containing '{}' found. Thread messages: {:?}",
-        expected_text,
-        thread_messages
-            .iter()
-            .map(|m| m["content"]["body"].as_str().unwrap_or(""))
-            .collect::<Vec<_>>()
-    );
 
     if let Some(msg) = found {
         if let Some(event_id) = msg["event_id"].as_str() {
@@ -434,50 +457,72 @@ async fn threaded_reply_contains(world: &mut TestWorld, expected_text: String) {
 #[given(regex = r#"^the original message has a "([^"]*)" reaction$"#)]
 #[then(regex = r#"^the original message has a "([^"]*)" reaction$"#)]
 async fn has_reaction(world: &mut TestWorld, emoji: String) {
-    let http = http_client();
+    let synapse_port = world.synapse_port;
+    let token = world.observer_access_token.clone();
+    let room_id = world.room_id.clone();
+    let root_event_id = world.last_root_event_id.clone();
+    let emoji_clone = emoji.clone();
 
-    let reactions = world::get_relations(
-        &http,
-        world.synapse_port,
-        &world.observer_access_token,
-        &world.room_id,
-        &world.last_root_event_id,
-        "m.annotation",
-    )
-    .await;
-
-    let found = reactions
-        .iter()
-        .any(|r| r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str()));
-
-    assert!(
-        found,
-        "No '{emoji}' reaction found on the original message. Reactions: {reactions:?}"
-    );
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!("'{emoji}' reaction to appear"))
+        .until_async(|| {
+            let http = http_client();
+            let token = token.clone();
+            let room_id = room_id.clone();
+            let root_event_id = root_event_id.clone();
+            let emoji_clone = emoji_clone.clone();
+            async move {
+                let reactions = world::get_relations(
+                    &http,
+                    synapse_port,
+                    &token,
+                    &room_id,
+                    &root_event_id,
+                    "m.annotation",
+                )
+                .await;
+                reactions.iter().any(|r| {
+                    r["content"]["m.relates_to"]["key"].as_str() == Some(emoji_clone.as_str())
+                })
+            }
+        })
+        .await;
 }
 
 #[then(regex = r#"^the original message no longer has a "([^"]*)" reaction$"#)]
 async fn no_longer_has_reaction(world: &mut TestWorld, emoji: String) {
-    let http = http_client();
+    let synapse_port = world.synapse_port;
+    let token = world.observer_access_token.clone();
+    let room_id = world.room_id.clone();
+    let root_event_id = world.last_root_event_id.clone();
+    let emoji_clone = emoji.clone();
 
-    let reactions = world::get_relations(
-        &http,
-        world.synapse_port,
-        &world.observer_access_token,
-        &world.room_id,
-        &world.last_root_event_id,
-        "m.annotation",
-    )
-    .await;
-
-    let found = reactions
-        .iter()
-        .any(|r| r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str()));
-
-    assert!(
-        !found,
-        "'{emoji}' reaction still exists on the original message"
-    );
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!("'{emoji}' reaction to be removed"))
+        .until_async(|| {
+            let http = http_client();
+            let token = token.clone();
+            let room_id = room_id.clone();
+            let root_event_id = root_event_id.clone();
+            let emoji_clone = emoji_clone.clone();
+            async move {
+                let reactions = world::get_relations(
+                    &http,
+                    synapse_port,
+                    &token,
+                    &room_id,
+                    &root_event_id,
+                    "m.annotation",
+                )
+                .await;
+                !reactions.iter().any(|r| {
+                    r["content"]["m.relates_to"]["key"].as_str() == Some(emoji_clone.as_str())
+                })
+            }
+        })
+        .await;
 }
 
 // -- Admin command steps --
@@ -526,60 +571,63 @@ async fn admin_sends_thread_reply(world: &mut TestWorld, command: String) {
         resp["event_id"].as_str().is_some(),
         "Failed to send admin command: {resp:?}"
     );
-
-    // Give the bot time to process the command via sync and send its reply
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 }
 
 #[then(regex = r#"^Seerr received a comment "([^"]*)" for issue (\d+)$"#)]
 async fn seerr_received_comment(world: &mut TestWorld, comment: String, issue_id: u64) {
-    let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
-
-    let received = mock_server
-        .received_requests()
-        .await
-        .expect("No requests recorded");
+    let mock_server = world
+        .seerr_mock
+        .as_ref()
+        .expect("Wiremock not started")
+        .clone();
     let expected_path = format!("/api/v1/issue/{}/comment", issue_id);
+    let comment_clone = comment.clone();
 
-    let found = received.iter().any(|req| {
-        if req.url.path() != expected_path {
-            return false;
-        }
-        if let Ok(body) = serde_json::from_slice::<serde_json::Value>(&req.body) {
-            body["message"].as_str() == Some(comment.as_str())
-        } else {
-            false
-        }
-    });
-
-    assert!(
-        found,
-        "Seerr did not receive comment '{comment}' for issue {issue_id}. Received requests: {:?}",
-        received
-            .iter()
-            .map(|r| format!("{} {}", r.method, r.url.path()))
-            .collect::<Vec<_>>()
-    );
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!(
+            "Seerr to receive comment '{comment}' for issue {issue_id}"
+        ))
+        .until_async(|| {
+            let mock_server = mock_server.clone();
+            let expected_path = expected_path.clone();
+            let comment_clone = comment_clone.clone();
+            async move {
+                let received = mock_server.received_requests().await.unwrap_or_default();
+                received.iter().any(|req| {
+                    if req.url.path() != expected_path {
+                        return false;
+                    }
+                    if let Ok(body) = serde_json::from_slice::<serde_json::Value>(&req.body) {
+                        body["message"].as_str() == Some(comment_clone.as_str())
+                    } else {
+                        false
+                    }
+                })
+            }
+        })
+        .await;
 }
 
 #[then(regex = r#"^Seerr received a resolve request for issue (\d+)$"#)]
 async fn seerr_received_resolve(world: &mut TestWorld, issue_id: u64) {
-    let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
-
-    let received = mock_server
-        .received_requests()
-        .await
-        .expect("No requests recorded");
+    let mock_server = world
+        .seerr_mock
+        .as_ref()
+        .expect("Wiremock not started")
+        .clone();
     let expected_path = format!("/api/v1/issue/{}/resolved", issue_id);
 
-    let found = received.iter().any(|req| req.url.path() == expected_path);
-
-    assert!(
-        found,
-        "Seerr did not receive resolve request for issue {issue_id}. Received requests: {:?}",
-        received
-            .iter()
-            .map(|r| format!("{} {}", r.method, r.url.path()))
-            .collect::<Vec<_>>()
-    );
+    awaitility::at_most(std::time::Duration::from_secs(10))
+        .poll_interval(std::time::Duration::from_millis(500))
+        .describe(&format!("Seerr to receive resolve for issue {issue_id}"))
+        .until_async(|| {
+            let mock_server = mock_server.clone();
+            let expected_path = expected_path.clone();
+            async move {
+                let received = mock_server.received_requests().await.unwrap_or_default();
+                received.iter().any(|req| req.url.path() == expected_path)
+            }
+        })
+        .await;
 }
