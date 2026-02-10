@@ -1,9 +1,25 @@
-[package]
-name = "michel-bot"
+[workspace]
+resolver = "2"
+members = [
+    "crates/matrix",
+    "crates/seerr",
+    "crates/db",
+    "crates/api",
+    "crates/michel-bot",
+]
+
+[workspace.package]
 version = "0.2.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+# Internal crates
+michel-matrix = { path = "crates/matrix" }
+michel-seerr = { path = "crates/seerr" }
+michel-db = { path = "crates/db" }
+michel-api = { path = "crates/api" }
+
+# External dependencies
 matrix-sdk = "0.16"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -15,7 +31,7 @@ tracing-subscriber = "0.3"
 anyhow = "1"
 reqwest = { version = "0.12", features = ["json"] }
 
-[dev-dependencies]
+# Test dependencies
 cucumber = { version = "0.22", features = ["libtest"] }
 testcontainers = "0.26"
 testcontainers-modules = { version = "0.14", features = ["postgres"] }
@@ -24,7 +40,3 @@ sha1 = "0.10"
 hex = "0.4"
 wiremock = "0.6"
 awaitility = "0.4"
-
-[[test]]
-name = "bdd"
-harness = false

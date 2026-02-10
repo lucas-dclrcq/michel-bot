@@ -7,9 +7,7 @@ use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Rela
 use sqlx::PgPool;
 use tracing::{error, info, warn};
 
-use crate::db;
-use crate::matrix;
-use crate::seerr_client::SeerrClient;
+use michel_seerr::SeerrClient;
 
 pub struct CommandContext {
     pub db: PgPool,
@@ -86,9 +84,11 @@ async fn handle_message(
                 }
             };
 
-            let issue_event =
-                db::get_issue_event_by_matrix_event_id(&ctx.db, thread_root_event_id.as_str())
-                    .await?;
+            let issue_event = michel_db::get_issue_event_by_matrix_event_id(
+                &ctx.db,
+                thread_root_event_id.as_str(),
+            )
+            .await?;
 
             let issue_event = match issue_event {
                 Some(ev) => ev,
@@ -113,7 +113,7 @@ async fn handle_message(
 
             let plain = format!("Issue {issue_id} resolved");
             let html = format!("<b>Issue {issue_id} resolved</b>");
-            matrix::send_thread_reply(room, thread_root_event_id, &plain, &html).await?;
+            michel_matrix::send_thread_reply(room, thread_root_event_id, &plain, &html).await?;
         }
     }
 

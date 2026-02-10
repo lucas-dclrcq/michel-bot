@@ -6,9 +6,7 @@ use axum::http::StatusCode;
 use tracing::{error, info, warn};
 
 use crate::AppState;
-use crate::db;
-use crate::matrix;
-use crate::seerr::SeerrWebhookPayload;
+use michel_seerr::SeerrWebhookPayload;
 
 pub async fn handle_seerr_webhook(
     State(state): State<Arc<AppState>>,
@@ -55,21 +53,21 @@ async fn handle_issue_created(
     let message = payload.message.as_deref().unwrap_or("");
 
     let plain_body = format!(
-        "🔴 New Seerr issue\nSubject: {}\nDescription: {}\nReported by: {}",
+        "New Seerr issue\nSubject: {}\nDescription: {}\nReported by: {}",
         payload.subject, message, reported_by
     );
     let html_body = format!(
-        "<h4>🔴 New Seerr issue</h4>\
+        "<h4>New Seerr issue</h4>\
          <b>Subject:</b> {}<br/>\
          <b>Description:</b> {}<br/>\
          <b>Reported by:</b> {}",
         payload.subject, message, reported_by
     );
 
-    let event_id = matrix::send_html_message(&state.room, &plain_body, &html_body).await?;
+    let event_id = michel_matrix::send_html_message(&state.room, &plain_body, &html_body).await?;
     let room_id = state.room.room_id().to_string();
 
-    db::insert_issue_event(&state.db, issue_id, event_id.as_str(), &room_id).await?;
+    michel_db::insert_issue_event(&state.db, issue_id, event_id.as_str(), &room_id).await?;
     info!(issue_id, %event_id, "Issue created message sent");
 
     Ok(())
@@ -86,7 +84,7 @@ async fn handle_issue_resolved(
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid issue_id"))?;
 
-    let issue_event = db::get_issue_event(&state.db, issue_id)
+    let issue_event = michel_db::get_issue_event(&state.db, issue_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("No event found for issue {issue_id}"))?;
 
@@ -95,17 +93,17 @@ async fn handle_issue_resolved(
     let comment = payload.comment.as_deref().unwrap_or("");
     let commented_by = payload.commented_by.as_deref().unwrap_or("unknown");
 
-    let plain_body = format!("✅ Issue resolved\nComment: {comment}\nBy: {commented_by}");
+    let plain_body = format!("Issue resolved\nComment: {comment}\nBy: {commented_by}");
     let html_body = format!(
-        "<b>✅ Issue resolved</b><br/>\
+        "<b>Issue resolved</b><br/>\
          <b>Comment:</b> {comment}<br/>\
          <b>By:</b> {commented_by}"
     );
 
-    matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
+    michel_matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
 
-    let reaction_event_id = matrix::send_reaction(&state.room, &root_event_id, "✅").await?;
-    db::set_reaction_event_id(&state.db, issue_id, reaction_event_id.as_str()).await?;
+    let reaction_event_id = michel_matrix::send_reaction(&state.room, &root_event_id, "✅").await?;
+    michel_db::set_reaction_event_id(&state.db, issue_id, reaction_event_id.as_str()).await?;
 
     info!(issue_id, "Issue resolved message sent");
     Ok(())
@@ -122,7 +120,7 @@ async fn handle_issue_comment(
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid issue_id"))?;
 
-    let issue_event = db::get_issue_event(&state.db, issue_id)
+    let issue_event = michel_db::get_issue_event(&state.db, issue_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("No event found for issue {issue_id}"))?;
 
@@ -131,10 +129,10 @@ async fn handle_issue_comment(
     let comment = payload.comment.as_deref().unwrap_or("");
     let commented_by = payload.commented_by.as_deref().unwrap_or("unknown");
 
-    let plain_body = format!("💬 {commented_by} : {comment}");
-    let html_body = format!("<b>💬 {commented_by} :</b> {comment}");
+    let plain_body = format!("{commented_by} : {comment}");
+    let html_body = format!("<b>{commented_by} :</b> {comment}");
 
-    matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
+    michel_matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
 
     info!(issue_id, "Issue comment sent");
     Ok(())
@@ -151,7 +149,7 @@ async fn handle_issue_reopened(
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid issue_id"))?;
 
-    let issue_event = db::get_issue_event(&state.db, issue_id)
+    let issue_event = michel_db::get_issue_event(&state.db, issue_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("No event found for issue {issue_id}"))?;
 
@@ -159,18 +157,19 @@ async fn handle_issue_reopened(
 
     let reported_by = payload.reported_by.as_deref().unwrap_or("unknown");
 
-    let plain_body = format!("🔄 Issue reopened\nBy: {reported_by}");
+    let plain_body = format!("Issue reopened\nBy: {reported_by}");
     let html_body = format!(
-        "<b>🔄 Issue reopened</b><br/>\
+        "<b>Issue reopened</b><br/>\
          <b>By:</b> {reported_by}"
     );
 
-    matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
+    michel_matrix::send_thread_reply(&state.room, &root_event_id, &plain_body, &html_body).await?;
 
     if let Some(reaction_event_id_str) = &issue_event.reaction_event_id {
         let reaction_event_id = reaction_event_id_str.as_str().try_into()?;
-        matrix::redact_event(&state.room, &reaction_event_id, Some("Issue reopened")).await?;
-        db::clear_reaction_event_id(&state.db, issue_id).await?;
+        michel_matrix::redact_event(&state.room, &reaction_event_id, Some("Issue reopened"))
+            .await?;
+        michel_db::clear_reaction_event_id(&state.db, issue_id).await?;
     }
 
     info!(issue_id, "Issue reopened message sent");
