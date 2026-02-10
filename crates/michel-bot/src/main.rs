@@ -8,34 +8,29 @@ use matrix_sdk::ruma::OwnedUserId;
 use sqlx::PgPool;
 use tracing::info;
 
-use michel_bot::AppState;
-use michel_bot::commands;
-use michel_bot::config;
-use michel_bot::db;
-use michel_bot::matrix;
-use michel_bot::seerr_client::SeerrClient;
-use michel_bot::webhook;
+use michel_api::{AppState, CommandContext, Config, handle_seerr_webhook, on_room_message};
+use michel_seerr::SeerrClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let config = config::Config::from_env()?;
+    let config = Config::from_env()?;
 
     let pool = PgPool::connect(&config.database_url)
         .await
         .context("Failed to connect to PostgreSQL")?;
-    db::run_migrations(&pool).await?;
+    michel_db::run_migrations(&pool).await?;
     info!("Database connected and migrations applied");
 
-    let client = matrix::create_and_login(
+    let client = michel_matrix::create_and_login(
         &config.matrix_homeserver_url,
         &config.matrix_user_id,
         &config.matrix_password,
     )
     .await?;
 
-    let (room, _room_id) = matrix::join_room(&client, &config.matrix_room_alias).await?;
+    let (room, _room_id) = michel_matrix::join_room(&client, &config.matrix_room_alias).await?;
 
     let seerr_client = SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
 
@@ -45,19 +40,19 @@ async fn main() -> Result<()> {
         .filter_map(|u| OwnedUserId::try_from(u.as_str()).ok())
         .collect();
 
-    let cmd_ctx = Arc::new(commands::CommandContext {
+    let cmd_ctx = Arc::new(CommandContext {
         db: pool.clone(),
         seerr_client,
         admin_users,
     });
 
     client.add_event_handler_context(cmd_ctx);
-    client.add_event_handler(commands::on_room_message);
+    client.add_event_handler(on_room_message);
 
     let state = Arc::new(AppState { room, db: pool });
 
     let app = Router::new()
-        .route("/webhook/seerr", post(webhook::handle_seerr_webhook))
+        .route("/webhook/seerr", post(handle_seerr_webhook))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&config.webhook_listen_addr)

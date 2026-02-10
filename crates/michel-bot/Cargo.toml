@@ -1,0 +1,38 @@
+[package]
+name = "michel-bot"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+michel-matrix.workspace = true
+michel-seerr.workspace = true
+michel-db.workspace = true
+michel-api.workspace = true
+
+matrix-sdk.workspace = true
+axum.workspace = true
+tokio.workspace = true
+sqlx.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+cucumber.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+hex.workspace = true
+wiremock.workspace = true
+awaitility.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+
+[[bin]]
+name = "michel-bot"
+path = "src/main.rs"
+
+[[test]]
+name = "bdd"
+harness = false

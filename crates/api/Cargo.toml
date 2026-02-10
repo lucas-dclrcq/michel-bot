@@ -1,0 +1,15 @@
+[package]
+name = "michel-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+michel-matrix.workspace = true
+michel-seerr.workspace = true
+michel-db.workspace = true
+
+matrix-sdk.workspace = true
+axum.workspace = true
+sqlx.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

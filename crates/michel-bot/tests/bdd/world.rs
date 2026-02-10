@@ -97,7 +97,7 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
             let pool = sqlx::PgPool::connect(&database_url)
                 .await
                 .expect("Failed to connect to Postgres for migrations");
-            michel_bot::db::run_migrations(&pool)
+            michel_db::run_migrations(&pool)
                 .await
                 .expect("Failed to run migrations");
             pool.close().await;
