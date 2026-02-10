@@ -129,8 +129,8 @@ pub async fn stop_shared_infra() {
     eprintln!("[test-infra] Containers stopped");
 }
 
-#[derive(Debug, World)]
-#[world(init = Self::new)]
+#[derive(World, Debug, Default)]
+#[world(init = Self::default)]
 pub struct TestWorld {
     pub synapse_port: u16,
     pub postgres_port: u16,
@@ -148,27 +148,6 @@ pub struct TestWorld {
     pub issue_admin_access_token: String,
 }
 
-impl TestWorld {
-    async fn new() -> Result<Self, anyhow::Error> {
-        Ok(Self {
-            synapse_port: 0,
-            postgres_port: 0,
-            bot_handle: None,
-            bot_shutdown: None,
-            bot_username: String::new(),
-            webhook_port: 0,
-            observer_access_token: String::new(),
-            admin_access_token: String::new(),
-            room_id: String::new(),
-            room_alias: String::new(),
-            last_root_event_id: String::new(),
-            last_thread_event_id: String::new(),
-            seerr_mock: None,
-            issue_admin_access_token: String::new(),
-        })
-    }
-}
-
 impl Drop for TestWorld {
     fn drop(&mut self) {
         // Signal bot to shut down
@@ -183,6 +162,7 @@ impl Drop for TestWorld {
 
 pub async fn start_synapse() -> (ContainerAsync<GenericImage>, u16) {
     let homeserver_yaml = format!(
+        //language=yaml
         r#"server_name: "localhost"
 pid_file: /data/homeserver.pid
 listeners:

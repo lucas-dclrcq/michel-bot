@@ -11,8 +11,6 @@ fn http_client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-// -- Given steps --
-
 #[given("a running Matrix homeserver")]
 async fn a_running_matrix_homeserver(world: &mut TestWorld) {
     let infra = world::get_shared_infra().await;
