@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use tracing::{error, info, warn};
 
 use crate::AppState;
-use michel_seerr::SeerrWebhookPayload;
+use michel_seerr::{SeerrNotificationType, SeerrWebhookPayload};
 
 pub async fn handle_seerr_webhook(
     State(state): State<Arc<AppState>>,
@@ -18,13 +18,13 @@ pub async fn handle_seerr_webhook(
         "Received Seerr webhook"
     );
 
-    let result = match payload.notification_type.as_str() {
-        "ISSUE_CREATED" => handle_issue_created(&state, &payload).await,
-        "ISSUE_RESOLVED" => handle_issue_resolved(&state, &payload).await,
-        "ISSUE_COMMENT" => handle_issue_comment(&state, &payload).await,
-        "ISSUE_REOPENED" => handle_issue_reopened(&state, &payload).await,
-        other => {
-            warn!("Unknown notification type: {other}");
+    let result = match payload.notification_type {
+        SeerrNotificationType::IssueCreated => handle_issue_created(&state, &payload).await,
+        SeerrNotificationType::IssueResolved => handle_issue_resolved(&state, &payload).await,
+        SeerrNotificationType::IssueComment => handle_issue_comment(&state, &payload).await,
+        SeerrNotificationType::IssueReopened => handle_issue_reopened(&state, &payload).await,
+        SeerrNotificationType::Unknown => {
+            warn!("Unknown notification type");
             return StatusCode::OK;
         }
     };
