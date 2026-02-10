@@ -5,9 +5,7 @@ use cucumber::{given, then, when};
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::world::{
-    self, TestWorld, ADMIN_USERNAME, BOT_PASSWORD, OBSERVER_USERNAME,
-};
+use crate::world::{self, ADMIN_USERNAME, BOT_PASSWORD, OBSERVER_USERNAME, TestWorld};
 
 fn http_client() -> reqwest::Client {
     reqwest::Client::new()
@@ -42,14 +40,8 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
     world.bot_username = bot_username.clone();
 
     let http = http_client();
-    world::register_user_via_shared_secret(
-        &http,
-        synapse_port,
-        &bot_username,
-        BOT_PASSWORD,
-        false,
-    )
-    .await;
+    world::register_user_via_shared_secret(&http, synapse_port, &bot_username, BOT_PASSWORD, false)
+        .await;
 
     // Find a free port for the webhook server
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -81,9 +73,8 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
     world.seerr_mock = Some(Arc::new(mock_server));
 
     let homeserver_url = format!("http://localhost:{synapse_port}");
-    let database_url = format!(
-        "postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test"
-    );
+    let database_url =
+        format!("postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test");
     let listen_addr = format!("127.0.0.1:{webhook_port}");
     let admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
     let matrix_room_alias = room_alias;
@@ -130,16 +121,19 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
             }
         };
 
-        let (room, _room_id) = match michel_bot::matrix::join_room(&client, &config.matrix_room_alias).await {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = ready_tx.send(Err(format!("Failed to join room: {e}")));
-                return;
-            }
-        };
+        let (room, _room_id) =
+            match michel_bot::matrix::join_room(&client, &config.matrix_room_alias).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(format!("Failed to join room: {e}")));
+                    return;
+                }
+            };
 
-        let seerr_client =
-            michel_bot::seerr_client::SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
+        let seerr_client = michel_bot::seerr_client::SeerrClient::new(
+            &config.seerr_api_url,
+            &config.seerr_api_key,
+        );
 
         let admin_users: Vec<matrix_sdk::ruma::OwnedUserId> = config
             .matrix_admin_users
@@ -355,10 +349,7 @@ async fn the_message_contains(world: &mut TestWorld, expected_text: String) {
         body.contains(&expected_text) || formatted.contains(&expected_text)
     });
 
-    assert!(
-        found,
-        "Root message does not contain '{expected_text}'"
-    );
+    assert!(found, "Root message does not contain '{expected_text}'");
 }
 
 #[given(regex = r#"^a threaded reply appears on the original message containing "([^"]*)"$"#)]
@@ -437,10 +428,7 @@ async fn threaded_reply_contains(world: &mut TestWorld, expected_text: String) {
         body.contains(&expected_text) || formatted.contains(&expected_text)
     });
 
-    assert!(
-        found,
-        "Threaded reply does not contain '{expected_text}'"
-    );
+    assert!(found, "Threaded reply does not contain '{expected_text}'");
 }
 
 #[given(regex = r#"^the original message has a "([^"]*)" reaction$"#)]
@@ -458,9 +446,9 @@ async fn has_reaction(world: &mut TestWorld, emoji: String) {
     )
     .await;
 
-    let found = reactions.iter().any(|r| {
-        r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str())
-    });
+    let found = reactions
+        .iter()
+        .any(|r| r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str()));
 
     assert!(
         found,
@@ -482,9 +470,9 @@ async fn no_longer_has_reaction(world: &mut TestWorld, emoji: String) {
     )
     .await;
 
-    let found = reactions.iter().any(|r| {
-        r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str())
-    });
+    let found = reactions
+        .iter()
+        .any(|r| r["content"]["m.relates_to"]["key"].as_str() == Some(emoji.as_str()));
 
     assert!(
         !found,
@@ -517,7 +505,13 @@ async fn admin_sends_thread_reply(world: &mut TestWorld, command: String) {
             "http://localhost:{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
             world.synapse_port,
             world.room_id,
-            format!("txn-admin-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()),
+            format!(
+                "txn-admin-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+            ),
         ))
         .bearer_auth(&world.issue_admin_access_token)
         .json(&body)
@@ -541,7 +535,10 @@ async fn admin_sends_thread_reply(world: &mut TestWorld, command: String) {
 async fn seerr_received_comment(world: &mut TestWorld, comment: String, issue_id: u64) {
     let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
 
-    let received = mock_server.received_requests().await.expect("No requests recorded");
+    let received = mock_server
+        .received_requests()
+        .await
+        .expect("No requests recorded");
     let expected_path = format!("/api/v1/issue/{}/comment", issue_id);
 
     let found = received.iter().any(|req| {
@@ -558,7 +555,10 @@ async fn seerr_received_comment(world: &mut TestWorld, comment: String, issue_id
     assert!(
         found,
         "Seerr did not receive comment '{comment}' for issue {issue_id}. Received requests: {:?}",
-        received.iter().map(|r| format!("{} {}", r.method, r.url.path())).collect::<Vec<_>>()
+        received
+            .iter()
+            .map(|r| format!("{} {}", r.method, r.url.path()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -566,7 +566,10 @@ async fn seerr_received_comment(world: &mut TestWorld, comment: String, issue_id
 async fn seerr_received_resolve(world: &mut TestWorld, issue_id: u64) {
     let mock_server = world.seerr_mock.as_ref().expect("Wiremock not started");
 
-    let received = mock_server.received_requests().await.expect("No requests recorded");
+    let received = mock_server
+        .received_requests()
+        .await
+        .expect("No requests recorded");
     let expected_path = format!("/api/v1/issue/{}/resolved", issue_id);
 
     let found = received.iter().any(|req| req.url.path() == expected_path);
@@ -574,6 +577,9 @@ async fn seerr_received_resolve(world: &mut TestWorld, issue_id: u64) {
     assert!(
         found,
         "Seerr did not receive resolve request for issue {issue_id}. Received requests: {:?}",
-        received.iter().map(|r| format!("{} {}", r.method, r.url.path())).collect::<Vec<_>>()
+        received
+            .iter()
+            .map(|r| format!("{} {}", r.method, r.url.path()))
+            .collect::<Vec<_>>()
     );
 }

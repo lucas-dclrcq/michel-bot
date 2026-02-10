@@ -40,12 +40,14 @@ pub async fn get_issue_event(pool: &PgPool, issue_id: i64) -> Result<Option<Issu
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|(issue_id, matrix_event_id, matrix_room_id, reaction_event_id)| IssueEvent {
-        issue_id,
-        matrix_event_id,
-        matrix_room_id,
-        reaction_event_id,
-    }))
+    Ok(row.map(
+        |(issue_id, matrix_event_id, matrix_room_id, reaction_event_id)| IssueEvent {
+            issue_id,
+            matrix_event_id,
+            matrix_room_id,
+            reaction_event_id,
+        },
+    ))
 }
 
 pub async fn set_reaction_event_id(
@@ -80,10 +82,12 @@ pub async fn get_issue_event_by_matrix_event_id(
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|(issue_id, matrix_event_id, matrix_room_id, reaction_event_id)| IssueEvent {
-        issue_id,
-        matrix_event_id,
-        matrix_room_id,
-        reaction_event_id,
-    }))
+    Ok(row.map(
+        |(issue_id, matrix_event_id, matrix_room_id, reaction_event_id)| IssueEvent {
+            issue_id,
+            matrix_event_id,
+            matrix_room_id,
+            reaction_event_id,
+        },
+    ))
 }

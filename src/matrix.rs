@@ -12,7 +12,9 @@ pub async fn create_and_login(
     password: &str,
 ) -> Result<Client> {
     let url = homeserver_url.parse().context("Invalid homeserver URL")?;
-    let client = Client::new(url).await.context("Failed to create Matrix client")?;
+    let client = Client::new(url)
+        .await
+        .context("Failed to create Matrix client")?;
 
     client
         .matrix_auth()
@@ -27,9 +29,7 @@ pub async fn create_and_login(
 }
 
 pub async fn join_room(client: &Client, room_alias: &str) -> Result<(Room, OwnedRoomId)> {
-    let alias: OwnedRoomOrAliasId = room_alias
-        .try_into()
-        .context("Invalid room alias")?;
+    let alias: OwnedRoomOrAliasId = room_alias.try_into().context("Invalid room alias")?;
     let room = client
         .join_room_by_id_or_alias(&alias, &[])
         .await
@@ -62,7 +62,10 @@ pub async fn send_thread_reply(
             thread_root_event_id.clone(),
         ),
     ));
-    let response = room.send(content).await.context("Failed to send thread reply")?;
+    let response = room
+        .send(content)
+        .await
+        .context("Failed to send thread reply")?;
     Ok(response.event_id)
 }
 
@@ -73,7 +76,10 @@ pub async fn send_reaction(
 ) -> Result<OwnedEventId> {
     let annotation = Annotation::new(event_id.clone(), emoji.to_string());
     let content = ReactionEventContent::new(annotation);
-    let response = room.send(content).await.context("Failed to send reaction")?;
+    let response = room
+        .send(content)
+        .await
+        .context("Failed to send reaction")?;
     Ok(response.event_id)
 }
 

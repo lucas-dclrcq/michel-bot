@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
-mod world;
 mod steps;
+mod world;
 
 use cucumber::World;
 

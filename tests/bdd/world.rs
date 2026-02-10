@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cucumber::World;
-use testcontainers::core::{ContainerAsync, ContainerPort, WaitFor};
-use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;
+use testcontainers::core::{ContainerAsync, ContainerPort, WaitFor};
+use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres;
 use tokio::sync::OnceCell;
 use wiremock::MockServer;
@@ -13,6 +13,7 @@ use wiremock::MockServer;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const SYNAPSE_PORT: u16 = 8008;
+pub const SYNAPSE_VERSION: &str = "v1.146.0";
 pub const SHARED_SECRET: &str = "test-secret-key";
 pub const BOT_PASSWORD: &str = "bot_password";
 pub const OBSERVER_USERNAME: &str = "observer";
@@ -42,12 +43,25 @@ static SHARED_INFRA: OnceCell<SharedInfra> = OnceCell::const_new();
 pub async fn get_shared_infra() -> &'static SharedInfra {
     SHARED_INFRA
         .get_or_init(|| async {
+            let t0 = std::time::Instant::now();
+            eprintln!("[test-infra] Starting Synapse container...");
             let (synapse_container, synapse_port) = start_synapse().await;
+            eprintln!(
+                "[test-infra] Synapse ready on port {synapse_port} ({:.1}s)",
+                t0.elapsed().as_secs_f64()
+            );
+
+            let t1 = std::time::Instant::now();
+            eprintln!("[test-infra] Starting Postgres container...");
             let (postgres_container, postgres_port) = start_postgres().await;
+            eprintln!(
+                "[test-infra] Postgres ready on port {postgres_port} ({:.1}s)",
+                t1.elapsed().as_secs_f64()
+            );
 
             let http = reqwest::Client::new();
 
-            // Register admin user
+            eprintln!("[test-infra] Registering admin user...");
             let admin_access_token = register_user_via_shared_secret(
                 &http,
                 synapse_port,
@@ -57,7 +71,7 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
             )
             .await;
 
-            // Register observer user
+            eprintln!("[test-infra] Registering observer user...");
             let observer_access_token = register_user_via_shared_secret(
                 &http,
                 synapse_port,
@@ -67,7 +81,7 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
             )
             .await;
 
-            // Register issue admin user
+            eprintln!("[test-infra] Registering issue admin user...");
             let issue_admin_access_token = register_user_via_shared_secret(
                 &http,
                 synapse_port,
@@ -77,10 +91,9 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
             )
             .await;
 
-            // Run migrations once upfront to avoid races between bots
-            let database_url = format!(
-                "postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test"
-            );
+            eprintln!("[test-infra] Running database migrations...");
+            let database_url =
+                format!("postgres://testuser:testpass@localhost:{postgres_port}/michel_bot_test");
             let pool = sqlx::PgPool::connect(&database_url)
                 .await
                 .expect("Failed to connect to Postgres for migrations");
@@ -88,6 +101,11 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
                 .await
                 .expect("Failed to run migrations");
             pool.close().await;
+
+            eprintln!(
+                "[test-infra] All infrastructure ready ({:.1}s total)",
+                t0.elapsed().as_secs_f64()
+            );
 
             SharedInfra {
                 synapse_container,
@@ -103,10 +121,12 @@ pub async fn get_shared_infra() -> &'static SharedInfra {
 }
 
 pub async fn stop_shared_infra() {
+    eprintln!("[test-infra] Stopping containers...");
     if let Some(infra) = SHARED_INFRA.get() {
         let _ = infra.synapse_container.stop().await;
         let _ = infra.postgres_container.stop().await;
     }
+    eprintln!("[test-infra] Containers stopped");
 }
 
 #[derive(Debug, World)]
@@ -208,20 +228,15 @@ root:
   handlers: [console]
 "#;
 
-    let container = GenericImage::new("matrixdotorg/synapse", "latest")
+    let container = GenericImage::new("ghcr.io/element-hq/synapse", SYNAPSE_VERSION)
         .with_exposed_port(ContainerPort::Tcp(SYNAPSE_PORT))
-        .with_wait_for(WaitFor::message_on_stderr("SynapseSite starting on"))
-        .with_copy_to(
-            "/data/homeserver.yaml",
-            homeserver_yaml.into_bytes(),
-        )
-        .with_copy_to(
-            "/data/localhost.log.config",
-            log_config.as_bytes().to_vec(),
-        )
+        .with_wait_for(WaitFor::healthcheck())
+        .with_copy_to("/data/homeserver.yaml", homeserver_yaml.into_bytes())
+        .with_copy_to("/data/localhost.log.config", log_config.as_bytes().to_vec())
         .with_env_var("SYNAPSE_CONFIG_PATH", "/data/homeserver.yaml")
         .with_env_var("UID", "0")
         .with_env_var("GID", "0")
+        .with_startup_timeout(std::time::Duration::from_secs(120))
         .start()
         .await
         .expect("Failed to start Synapse container");
@@ -377,10 +392,7 @@ pub async fn sync_and_find_messages(
         .await
         .expect("Failed to parse messages");
 
-    resp["chunk"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    resp["chunk"].as_array().cloned().unwrap_or_default()
 }
 
 pub async fn get_relations(
@@ -403,8 +415,5 @@ pub async fn get_relations(
         .await
         .expect("Failed to parse relations response");
 
-    resp["chunk"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    resp["chunk"].as_array().cloned().unwrap_or_default()
 }

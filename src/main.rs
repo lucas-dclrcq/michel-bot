@@ -1,20 +1,20 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::routing::post;
 use axum::Router;
+use axum::routing::post;
 use matrix_sdk::config::SyncSettings;
 use matrix_sdk::ruma::OwnedUserId;
 use sqlx::PgPool;
 use tracing::info;
 
+use michel_bot::AppState;
 use michel_bot::commands;
 use michel_bot::config;
 use michel_bot::db;
 use michel_bot::matrix;
 use michel_bot::seerr_client::SeerrClient;
 use michel_bot::webhook;
-use michel_bot::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {

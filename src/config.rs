@@ -23,14 +23,11 @@ impl Config {
                 .context("MATRIX_PASSWORD must be set")?,
             matrix_room_alias: std::env::var("MATRIX_ROOM_ALIAS")
                 .context("MATRIX_ROOM_ALIAS must be set")?,
-            database_url: std::env::var("DATABASE_URL")
-                .context("DATABASE_URL must be set")?,
+            database_url: std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
             webhook_listen_addr: std::env::var("WEBHOOK_LISTEN_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
-            seerr_api_url: std::env::var("SEERR_API_URL")
-                .context("SEERR_API_URL must be set")?,
-            seerr_api_key: std::env::var("SEERR_API_KEY")
-                .context("SEERR_API_KEY must be set")?,
+            seerr_api_url: std::env::var("SEERR_API_URL").context("SEERR_API_URL must be set")?,
+            seerr_api_key: std::env::var("SEERR_API_KEY").context("SEERR_API_KEY must be set")?,
             matrix_admin_users: std::env::var("MATRIX_ADMIN_USERS")
                 .unwrap_or_default()
                 .split(',')

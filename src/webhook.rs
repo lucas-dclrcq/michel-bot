@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use tracing::{error, info, warn};
 
+use crate::AppState;
 use crate::db;
 use crate::matrix;
 use crate::seerr::SeerrWebhookPayload;
-use crate::AppState;
 
 pub async fn handle_seerr_webhook(
     State(state): State<Arc<AppState>>,
@@ -40,7 +40,10 @@ pub async fn handle_seerr_webhook(
     }
 }
 
-async fn handle_issue_created(state: &AppState, payload: &SeerrWebhookPayload) -> anyhow::Result<()> {
+async fn handle_issue_created(
+    state: &AppState,
+    payload: &SeerrWebhookPayload,
+) -> anyhow::Result<()> {
     let issue_id: i64 = payload
         .issue_id
         .as_deref()
@@ -72,7 +75,10 @@ async fn handle_issue_created(state: &AppState, payload: &SeerrWebhookPayload) -
     Ok(())
 }
 
-async fn handle_issue_resolved(state: &AppState, payload: &SeerrWebhookPayload) -> anyhow::Result<()> {
+async fn handle_issue_resolved(
+    state: &AppState,
+    payload: &SeerrWebhookPayload,
+) -> anyhow::Result<()> {
     let issue_id: i64 = payload
         .issue_id
         .as_deref()
@@ -105,7 +111,10 @@ async fn handle_issue_resolved(state: &AppState, payload: &SeerrWebhookPayload) 
     Ok(())
 }
 
-async fn handle_issue_comment(state: &AppState, payload: &SeerrWebhookPayload) -> anyhow::Result<()> {
+async fn handle_issue_comment(
+    state: &AppState,
+    payload: &SeerrWebhookPayload,
+) -> anyhow::Result<()> {
     let issue_id: i64 = payload
         .issue_id
         .as_deref()
@@ -131,7 +140,10 @@ async fn handle_issue_comment(state: &AppState, payload: &SeerrWebhookPayload) -
     Ok(())
 }
 
-async fn handle_issue_reopened(state: &AppState, payload: &SeerrWebhookPayload) -> anyhow::Result<()> {
+async fn handle_issue_reopened(
+    state: &AppState,
+    payload: &SeerrWebhookPayload,
+) -> anyhow::Result<()> {
     let issue_id: i64 = payload
         .issue_id
         .as_deref()

@@ -19,7 +19,10 @@ impl SeerrClient {
 
     pub async fn add_comment(&self, issue_id: i64, message: &str) -> Result<()> {
         self.client
-            .post(format!("{}/api/v1/issue/{}/comment", self.base_url, issue_id))
+            .post(format!(
+                "{}/api/v1/issue/{}/comment",
+                self.base_url, issue_id
+            ))
             .header("X-Api-Key", &self.api_key)
             .json(&json!({ "message": message }))
             .send()
@@ -32,7 +35,10 @@ impl SeerrClient {
 
     pub async fn resolve_issue(&self, issue_id: i64) -> Result<()> {
         self.client
-            .post(format!("{}/api/v1/issue/{}/resolved", self.base_url, issue_id))
+            .post(format!(
+                "{}/api/v1/issue/{}/resolved",
+                self.base_url, issue_id
+            ))
             .header("X-Api-Key", &self.api_key)
             .send()
             .await

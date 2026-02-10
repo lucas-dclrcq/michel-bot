@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use matrix_sdk::event_handler::Ctx;
-use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Relation};
-use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk::Room;
+use matrix_sdk::event_handler::Ctx;
+use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Relation};
 use sqlx::PgPool;
 use tracing::{error, info, warn};
 
@@ -32,7 +32,7 @@ fn parse_command(body: &str) -> Option<Command> {
         if rest.is_empty() {
             return Some(Command::Resolve { comment: None });
         }
-        
+
         if let Some(inner) = rest.strip_prefix('"') {
             let comment = inner.strip_suffix('"').unwrap_or(inner);
             if comment.is_empty() {
@@ -42,7 +42,7 @@ fn parse_command(body: &str) -> Option<Command> {
                 comment: Some(comment.to_string()),
             });
         }
-        
+
         return Some(Command::Resolve {
             comment: Some(rest.to_string()),
         });
@@ -104,9 +104,7 @@ async fn handle_message(
             let issue_id = issue_event.issue_id;
 
             if let Some(ref comment_text) = comment {
-                ctx.seerr_client
-                    .add_comment(issue_id, comment_text)
-                    .await?;
+                ctx.seerr_client.add_comment(issue_id, comment_text).await?;
                 info!(issue_id, comment = %comment_text, "Added comment to issue");
             }
 
