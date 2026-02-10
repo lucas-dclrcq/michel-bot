@@ -263,6 +263,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "awaitility"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a01a30fe9eeb37d815ce4dbb49702dc715305379ea72365a7cd468e463179648"
+
+[[package]]
 name = "axum"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2708,6 +2714,7 @@ name = "michel-bot"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "awaitility",
  "axum",
  "cucumber",
  "hex",
