@@ -7,29 +7,114 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;
 use testcontainers_modules::postgres::Postgres;
+use tokio::sync::OnceCell;
 use wiremock::MockServer;
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const SYNAPSE_PORT: u16 = 8008;
 pub const SHARED_SECRET: &str = "test-secret-key";
-pub const BOT_USERNAME: &str = "bot";
 pub const BOT_PASSWORD: &str = "bot_password";
 pub const OBSERVER_USERNAME: &str = "observer";
 pub const OBSERVER_PASSWORD: &str = "observer_password";
 pub const ADMIN_USERNAME: &str = "issueadmin";
 pub const ADMIN_PASSWORD: &str = "issueadmin_password";
 
+static BOT_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+pub fn next_bot_username() -> String {
+    let n = BOT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    format!("bot{n}")
+}
+
+pub struct SharedInfra {
+    _synapse_container: ContainerAsync<GenericImage>,
+    _postgres_container: ContainerAsync<Postgres>,
+    pub synapse_port: u16,
+    pub postgres_port: u16,
+    pub admin_access_token: String,
+    pub observer_access_token: String,
+    pub issue_admin_access_token: String,
+}
+
+static SHARED_INFRA: OnceCell<SharedInfra> = OnceCell::const_new();
+
+pub async fn get_shared_infra() -> &'static SharedInfra {
+    SHARED_INFRA
+        .get_or_init(|| async {
+            let (synapse_container, synapse_port) = start_synapse().await;
+            let (postgres_container, postgres_port) = start_postgres().await;
+
+            let http = reqwest::Client::new();
+
+            // Register admin user
+            let admin_access_token = register_user_via_shared_secret(
+                &http,
+                synapse_port,
+                "admin",
+                "admin_password",
+                true,
+            )
+            .await;
+
+            // Register observer user
+            let observer_access_token = register_user_via_shared_secret(
+                &http,
+                synapse_port,
+                OBSERVER_USERNAME,
+                OBSERVER_PASSWORD,
+                false,
+            )
+            .await;
+
+            // Register issue admin user
+            let issue_admin_access_token = register_user_via_shared_secret(
+                &http,
+                synapse_port,
+                ADMIN_USERNAME,
+                ADMIN_PASSWORD,
+                false,
+            )
+            .await;
+
+            // Run migrations once upfront to avoid races between bots
+            let database_url = format!(
+                "postgres://testuser:testpass@localhost:{postgres_port}/homelab_bot_test"
+            );
+            let pool = sqlx::PgPool::connect(&database_url)
+                .await
+                .expect("Failed to connect to Postgres for migrations");
+            homelab_bot::db::run_migrations(&pool)
+                .await
+                .expect("Failed to run migrations");
+            pool.close().await;
+
+            SharedInfra {
+                _synapse_container: synapse_container,
+                _postgres_container: postgres_container,
+                synapse_port,
+                postgres_port,
+                admin_access_token,
+                observer_access_token,
+                issue_admin_access_token,
+            }
+        })
+        .await
+}
+
 #[derive(Debug, World)]
 #[world(init = Self::new)]
 pub struct TestWorld {
-    pub synapse_container: Option<ContainerAsync<GenericImage>>,
-    pub postgres_container: Option<ContainerAsync<Postgres>>,
     pub synapse_port: u16,
     pub postgres_port: u16,
     pub bot_handle: Option<tokio::task::JoinHandle<()>>,
+    pub bot_shutdown: Option<tokio::sync::watch::Sender<bool>>,
+    pub bot_username: String,
     pub webhook_port: u16,
     pub observer_access_token: String,
     pub admin_access_token: String,
     pub room_id: String,
+    pub room_alias: String,
     pub last_root_event_id: String,
     pub last_thread_event_id: String,
     pub seerr_mock: Option<Arc<MockServer>>,
@@ -39,20 +124,33 @@ pub struct TestWorld {
 impl TestWorld {
     async fn new() -> Result<Self, anyhow::Error> {
         Ok(Self {
-            synapse_container: None,
-            postgres_container: None,
             synapse_port: 0,
             postgres_port: 0,
             bot_handle: None,
+            bot_shutdown: None,
+            bot_username: String::new(),
             webhook_port: 0,
             observer_access_token: String::new(),
             admin_access_token: String::new(),
             room_id: String::new(),
+            room_alias: String::new(),
             last_root_event_id: String::new(),
             last_thread_event_id: String::new(),
             seerr_mock: None,
             issue_admin_access_token: String::new(),
         })
+    }
+}
+
+impl Drop for TestWorld {
+    fn drop(&mut self) {
+        // Signal bot to shut down
+        if let Some(tx) = self.bot_shutdown.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(handle) = self.bot_handle.take() {
+            handle.abort();
+        }
     }
 }
 

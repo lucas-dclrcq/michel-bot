@@ -6,8 +6,7 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::world::{
-    self, TestWorld, ADMIN_PASSWORD, ADMIN_USERNAME, BOT_PASSWORD, BOT_USERNAME,
-    OBSERVER_PASSWORD, OBSERVER_USERNAME,
+    self, TestWorld, ADMIN_USERNAME, BOT_PASSWORD, OBSERVER_USERNAME,
 };
 
 fn http_client() -> reqwest::Client {
@@ -18,74 +17,39 @@ fn http_client() -> reqwest::Client {
 
 #[given("a running Matrix homeserver")]
 async fn a_running_matrix_homeserver(world: &mut TestWorld) {
-    if world.synapse_container.is_some() {
-        return;
-    }
-    let (container, port) = world::start_synapse().await;
-    world.synapse_container = Some(container);
-    world.synapse_port = port;
-
-    let http = http_client();
-
-    // Register admin user
-    world.admin_access_token = world::register_user_via_shared_secret(
-        &http,
-        world.synapse_port,
-        "admin",
-        "admin_password",
-        true,
-    )
-    .await;
-
-    // Register bot user
-    world::register_user_via_shared_secret(
-        &http,
-        world.synapse_port,
-        BOT_USERNAME,
-        BOT_PASSWORD,
-        false,
-    )
-    .await;
-
-    // Register observer user
-    world.observer_access_token = world::register_user_via_shared_secret(
-        &http,
-        world.synapse_port,
-        OBSERVER_USERNAME,
-        OBSERVER_PASSWORD,
-        false,
-    )
-    .await;
-
-    // Register issue admin user (for command tests)
-    world.issue_admin_access_token = world::register_user_via_shared_secret(
-        &http,
-        world.synapse_port,
-        ADMIN_USERNAME,
-        ADMIN_PASSWORD,
-        false,
-    )
-    .await;
+    let infra = world::get_shared_infra().await;
+    world.synapse_port = infra.synapse_port;
+    world.admin_access_token = infra.admin_access_token.clone();
+    world.observer_access_token = infra.observer_access_token.clone();
+    world.issue_admin_access_token = infra.issue_admin_access_token.clone();
 }
 
 #[given("a running PostgreSQL database")]
 async fn a_running_postgres(world: &mut TestWorld) {
-    if world.postgres_container.is_some() {
-        return;
-    }
-    let (container, port) = world::start_postgres().await;
-    world.postgres_container = Some(container);
-    world.postgres_port = port;
+    let infra = world::get_shared_infra().await;
+    world.postgres_port = infra.postgres_port;
 }
 
-#[given("the bot is started and connected to Matrix")]
-async fn the_bot_is_started(world: &mut TestWorld) {
-    if world.bot_handle.is_some() {
-        return;
-    }
+#[given(expr = "the bot is started and connected to room {string}")]
+async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
+    world.room_alias = room_alias.clone();
 
     let synapse_port = world.synapse_port;
     let postgres_port = world.postgres_port;
+
+    // Register a unique bot user for this scenario
+    let bot_username = world::next_bot_username();
+    world.bot_username = bot_username.clone();
+
+    let http = http_client();
+    world::register_user_via_shared_secret(
+        &http,
+        synapse_port,
+        &bot_username,
+        BOT_PASSWORD,
+        false,
+    )
+    .await;
 
     // Find a free port for the webhook server
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -122,13 +86,17 @@ async fn the_bot_is_started(world: &mut TestWorld) {
     );
     let listen_addr = format!("127.0.0.1:{webhook_port}");
     let admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
+    let matrix_room_alias = room_alias;
+
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
     let handle = tokio::spawn(async move {
         let config = homelab_bot::config::Config {
             matrix_homeserver_url: homeserver_url,
-            matrix_user_id: BOT_USERNAME.to_string(),
+            matrix_user_id: bot_username.to_string(),
             matrix_password: BOT_PASSWORD.to_string(),
-            matrix_room_alias: "#support_hoohoot:localhost".to_string(),
+            matrix_room_alias,
             database_url,
             webhook_listen_addr: listen_addr,
             seerr_api_url,
@@ -136,24 +104,39 @@ async fn the_bot_is_started(world: &mut TestWorld) {
             matrix_admin_users: vec![admin_user_id],
         };
 
-        let pool = sqlx::PgPool::connect(&config.database_url)
-            .await
-            .expect("Failed to connect to DB");
-        homelab_bot::db::run_migrations(&pool)
-            .await
-            .expect("Failed to run migrations");
+        let pool = match sqlx::PgPool::connect(&config.database_url).await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to connect to DB: {e}")));
+                return;
+            }
+        };
+        if let Err(e) = homelab_bot::db::run_migrations(&pool).await {
+            let _ = ready_tx.send(Err(format!("Failed to run migrations: {e}")));
+            return;
+        }
 
-        let client = homelab_bot::matrix::create_and_login(
+        let client = match homelab_bot::matrix::create_and_login(
             &config.matrix_homeserver_url,
             &config.matrix_user_id,
             &config.matrix_password,
         )
         .await
-        .expect("Failed to login bot");
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to login bot: {e}")));
+                return;
+            }
+        };
 
-        let (room, _room_id) = homelab_bot::matrix::join_room(&client, &config.matrix_room_alias)
-            .await
-            .expect("Failed to join room");
+        let (room, _room_id) = match homelab_bot::matrix::join_room(&client, &config.matrix_room_alias).await {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to join room: {e}")));
+                return;
+            }
+        };
 
         let seerr_client =
             homelab_bot::seerr_client::SeerrClient::new(&config.seerr_api_url, &config.seerr_api_key);
@@ -182,9 +165,15 @@ async fn the_bot_is_started(world: &mut TestWorld) {
             )
             .with_state(state);
 
-        let listener = tokio::net::TcpListener::bind(&config.webhook_listen_addr)
-            .await
-            .expect("Failed to bind");
+        let listener = match tokio::net::TcpListener::bind(&config.webhook_listen_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to bind: {e}")));
+                return;
+            }
+        };
+
+        let _ = ready_tx.send(Ok(()));
 
         let sync_client = client.clone();
         tokio::select! {
@@ -192,35 +181,44 @@ async fn the_bot_is_started(world: &mut TestWorld) {
                 result.expect("Server error");
             }
             _ = sync_client.sync(matrix_sdk::config::SyncSettings::default()) => {}
+            _ = shutdown_rx.changed() => {}
         }
     });
 
     world.bot_handle = Some(handle);
+    world.bot_shutdown = Some(shutdown_tx);
 
-    // Give the bot time to start
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    // Wait for the bot to signal readiness
+    match ready_rx.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => panic!("Bot startup failed: {e}"),
+        Err(_) => panic!("Bot task exited before signaling readiness"),
+    }
+
+    // Small extra delay for sync to start
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 }
 
 #[given(expr = "a room {string} exists")]
 async fn a_room_exists(world: &mut TestWorld, room_alias: String) {
     let http = http_client();
-    // Extract local part from alias (e.g., "#support_hoohoot:localhost" -> "support_hoohoot")
+    // Extract local part from alias (e.g., "#test-issue-created" -> "test-issue-created")
     let local_part = room_alias
         .trim_start_matches('#')
         .split(':')
         .next()
         .unwrap_or(&room_alias);
 
-    let bot_user_id = format!("@{BOT_USERNAME}:localhost");
     let observer_user_id = format!("@{OBSERVER_USERNAME}:localhost");
     let issue_admin_user_id = format!("@{ADMIN_USERNAME}:localhost");
 
+    // Bot is not invited here; it joins on its own via join_room (public room)
     world.room_id = world::create_room(
         &http,
         world.synapse_port,
         &world.admin_access_token,
         local_part,
-        &[&bot_user_id, &observer_user_id, &issue_admin_user_id],
+        &[&observer_user_id, &issue_admin_user_id],
     )
     .await;
 
@@ -368,15 +366,29 @@ async fn the_message_contains(world: &mut TestWorld, expected_text: String) {
 async fn threaded_reply_appears(world: &mut TestWorld, expected_text: String) {
     let http = http_client();
 
-    let thread_messages = world::get_relations(
-        &http,
-        world.synapse_port,
-        &world.observer_access_token,
-        &world.room_id,
-        &world.last_root_event_id,
-        "m.thread",
-    )
-    .await;
+    let mut thread_messages = Vec::new();
+    for _ in 0..10 {
+        thread_messages = world::get_relations(
+            &http,
+            world.synapse_port,
+            &world.observer_access_token,
+            &world.room_id,
+            &world.last_root_event_id,
+            "m.thread",
+        )
+        .await;
+
+        let found = thread_messages.iter().any(|msg| {
+            let body = msg["content"]["body"].as_str().unwrap_or("");
+            let formatted = msg["content"]["formatted_body"].as_str().unwrap_or("");
+            body.contains(&expected_text) || formatted.contains(&expected_text)
+        });
+
+        if found {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 
     let found = thread_messages.iter().find(|msg| {
         let body = msg["content"]["body"].as_str().unwrap_or("");
@@ -521,8 +533,8 @@ async fn admin_sends_thread_reply(world: &mut TestWorld, command: String) {
         "Failed to send admin command: {resp:?}"
     );
 
-    // Give the bot time to process the command via sync
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    // Give the bot time to process the command via sync and send its reply
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 }
 
 #[then(regex = r#"^Seerr received a comment "([^"]*)" for issue (\d+)$"#)]
