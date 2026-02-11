@@ -1,18 +1,8 @@
 use anyhow::Result;
 use sqlx::PgPool;
 
-const MIGRATION_001: &str = r#"
-CREATE TABLE IF NOT EXISTS issue_events (
-    issue_id BIGINT PRIMARY KEY,
-    matrix_event_id TEXT NOT NULL,
-    matrix_room_id TEXT NOT NULL,
-    reaction_event_id TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"#;
-
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(MIGRATION_001).execute(pool).await?;
+    sqlx::migrate!().run(pool).await?;
     Ok(())
 }
 
