@@ -109,6 +109,7 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
             &config.matrix_homeserver_url,
             &config.matrix_user_id,
             &config.matrix_password,
+            &pool,
         )
         .await
         {

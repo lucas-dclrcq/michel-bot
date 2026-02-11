@@ -5,5 +5,7 @@ edition.workspace = true
 
 [dependencies]
 matrix-sdk.workspace = true
+michel-crypto-store.workspace = true
+sqlx.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

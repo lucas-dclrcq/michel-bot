@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
         &config.matrix_homeserver_url,
         &config.matrix_user_id,
         &config.matrix_password,
+        &pool,
     )
     .await?;
 

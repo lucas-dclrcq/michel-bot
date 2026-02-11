@@ -6,6 +6,7 @@ members = [
     "crates/db",
     "crates/api",
     "crates/michel-bot",
+    "crates/crypto-store",
 ]
 
 [workspace.package]
@@ -18,9 +19,16 @@ michel-matrix = { path = "crates/matrix" }
 michel-seerr = { path = "crates/seerr" }
 michel-db = { path = "crates/db" }
 michel-api = { path = "crates/api" }
+michel-crypto-store = { path = "crates/crypto-store" }
 
 # External dependencies
-matrix-sdk = "0.16"
+matrix-sdk = { version = "0.16", features = ["e2e-encryption"] }
+matrix-sdk-crypto = "0.16"
+matrix-sdk-common = "0.16"
+async-trait = "0.1"
+thiserror = "2"
+vodozemac = "0.8"
+ruma = "0.14"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,18 +1,32 @@
 use anyhow::{Context, Result};
+use matrix_sdk::config::StoreConfig;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::relation::Annotation;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId};
 use matrix_sdk::{Client, Room};
+use michel_crypto_store::PgCryptoStore;
+use sqlx::PgPool;
 use tracing::info;
 
 pub async fn create_and_login(
     homeserver_url: &str,
     user_id: &str,
     password: &str,
+    pool: &PgPool,
 ) -> Result<Client> {
-    let url = homeserver_url.parse().context("Invalid homeserver URL")?;
-    let client = Client::new(url)
+    let pg_store = PgCryptoStore::new(pool.clone());
+    pg_store
+        .run_migrations()
+        .await
+        .context("Failed to run crypto store migrations")?;
+
+    let store_config = StoreConfig::new("michel-bot".to_owned()).crypto_store(pg_store);
+
+    let client = Client::builder()
+        .homeserver_url(homeserver_url)
+        .store_config(store_config)
+        .build()
         .await
         .context("Failed to create Matrix client")?;
 
