@@ -84,7 +84,9 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
         let config = michel_api::Config {
             matrix_homeserver_url: homeserver_url,
             matrix_user_id: bot_username.to_string(),
-            matrix_password: BOT_PASSWORD.to_string(),
+            matrix_password: Some(BOT_PASSWORD.to_string()),
+            matrix_access_token: None,
+            matrix_device_id: None,
             matrix_room_alias,
             database_url,
             webhook_listen_addr: listen_addr,
@@ -105,10 +107,14 @@ async fn the_bot_is_started(world: &mut TestWorld, room_alias: String) {
             return;
         }
 
+        let credentials = michel_matrix::MatrixCredentials::Password {
+            user_id: &config.matrix_user_id,
+            password: config.matrix_password.as_deref().unwrap(),
+        };
+
         let client = match michel_matrix::create_and_login(
             &config.matrix_homeserver_url,
-            &config.matrix_user_id,
-            &config.matrix_password,
+            credentials,
             &pool,
         )
         .await

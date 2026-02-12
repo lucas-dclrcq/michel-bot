@@ -169,6 +169,13 @@ CREATE TABLE IF NOT EXISTS crypto_dehydrated_device_key (
     id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     data BYTEA NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS crypto_matrix_session (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    access_token TEXT NOT NULL
+);
 "#;
 
 #[derive(Debug)]
@@ -1155,4 +1162,66 @@ impl PgCryptoStore {
         }
         Ok(())
     }
+}
+
+pub async fn load_matrix_session(
+    pool: &PgPool,
+) -> std::result::Result<Option<(String, String, String)>, sqlx::Error> {
+    let row: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT user_id, device_id, access_token FROM crypto_matrix_session WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn save_matrix_session(
+    pool: &PgPool,
+    user_id: &str,
+    device_id: &str,
+    access_token: &str,
+) -> std::result::Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO crypto_matrix_session (id, user_id, device_id, access_token) \
+         VALUES (1, $1, $2, $3) \
+         ON CONFLICT (id) DO UPDATE SET user_id = $1, device_id = $2, access_token = $3",
+    )
+    .bind(user_id)
+    .bind(device_id)
+    .bind(access_token)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Clear all crypto store tables except `crypto_matrix_session`.
+///
+/// Use this to reset a stuck crypto state (e.g. unpublished one-time keys
+/// that the server already has) before creating a new device via login.
+pub async fn clear_crypto_store(pool: &PgPool) -> std::result::Result<(), sqlx::Error> {
+    sqlx::raw_sql(
+        "TRUNCATE \
+            crypto_account, \
+            crypto_identity, \
+            crypto_sessions, \
+            crypto_inbound_group_sessions, \
+            crypto_outbound_group_sessions, \
+            crypto_devices, \
+            crypto_user_identities, \
+            crypto_tracked_users, \
+            crypto_olm_hashes, \
+            crypto_gossip_requests, \
+            crypto_secrets_inbox, \
+            crypto_withheld_info, \
+            crypto_room_settings, \
+            crypto_room_key_bundles, \
+            crypto_custom_values, \
+            crypto_lease_locks, \
+            crypto_backup_keys, \
+            crypto_next_batch_token, \
+            crypto_dehydrated_device_key",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
