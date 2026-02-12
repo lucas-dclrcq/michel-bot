@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use tracing::info;
 
 use michel_api::{AppState, CommandContext, Config, handle_seerr_webhook, on_room_message};
+use michel_matrix::MatrixCredentials;
 use michel_seerr::SeerrClient;
 
 #[tokio::main]
@@ -23,13 +24,22 @@ async fn main() -> Result<()> {
     michel_db::run_migrations(&pool).await?;
     info!("Database connected and migrations applied");
 
-    let client = michel_matrix::create_and_login(
-        &config.matrix_homeserver_url,
-        &config.matrix_user_id,
-        &config.matrix_password,
-        &pool,
-    )
-    .await?;
+    let credentials = match (&config.matrix_access_token, &config.matrix_device_id) {
+        (Some(access_token), Some(device_id)) => MatrixCredentials::AccessToken {
+            user_id: &config.matrix_user_id,
+            access_token,
+            device_id,
+        },
+        _ => MatrixCredentials::Password {
+            user_id: &config.matrix_user_id,
+            password: config.matrix_password.as_deref().expect(
+                "MATRIX_PASSWORD must be set when MATRIX_ACCESS_TOKEN/MATRIX_DEVICE_ID are not",
+            ),
+        },
+    };
+
+    let client =
+        michel_matrix::create_and_login(&config.matrix_homeserver_url, credentials, &pool).await?;
 
     let (room, _room_id) = michel_matrix::join_room(&client, &config.matrix_room_alias).await?;
 
