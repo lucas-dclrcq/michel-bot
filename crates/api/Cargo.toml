@@ -13,3 +13,5 @@ axum.workspace = true
 sqlx.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+pest = "2.8.6"
+pest_derive = "2.8.6"

@@ -7,7 +7,10 @@ use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Rela
 use sqlx::PgPool;
 use tracing::{error, info, warn};
 
+use crate::commands::parser::parse_command;
 use michel_seerr::SeerrClient;
+
+mod parser;
 
 pub struct CommandContext {
     pub db: PgPool,
@@ -18,35 +21,6 @@ pub struct CommandContext {
 #[derive(Debug, PartialEq)]
 enum Command {
     Resolve { comment: Option<String> },
-}
-
-fn parse_command(body: &str) -> Option<Command> {
-    let body = body.trim();
-    let rest = body.strip_prefix("!issues")?;
-    let rest = rest.trim_start();
-
-    if let Some(rest) = rest.strip_prefix("resolve") {
-        let rest = rest.trim();
-        if rest.is_empty() {
-            return Some(Command::Resolve { comment: None });
-        }
-
-        if let Some(inner) = rest.strip_prefix('"') {
-            let comment = inner.strip_suffix('"').unwrap_or(inner);
-            if comment.is_empty() {
-                return Some(Command::Resolve { comment: None });
-            }
-            return Some(Command::Resolve {
-                comment: Some(comment.to_string()),
-            });
-        }
-
-        return Some(Command::Resolve {
-            comment: Some(rest.to_string()),
-        });
-    }
-
-    None
 }
 
 pub async fn on_room_message(
@@ -118,63 +92,4 @@ async fn handle_message(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_resolve_with_quoted_comment() {
-        assert_eq!(
-            parse_command(r#"!issues resolve "Subtitles fixed""#),
-            Some(Command::Resolve {
-                comment: Some("Subtitles fixed".to_string()),
-            })
-        );
-    }
-
-    #[test]
-    fn parse_resolve_with_unquoted_comment() {
-        assert_eq!(
-            parse_command("!issues resolve fixed it"),
-            Some(Command::Resolve {
-                comment: Some("fixed it".to_string()),
-            })
-        );
-    }
-
-    #[test]
-    fn parse_resolve_no_comment() {
-        assert_eq!(
-            parse_command("!issues resolve"),
-            Some(Command::Resolve { comment: None })
-        );
-    }
-
-    #[test]
-    fn parse_resolve_empty_quoted_comment() {
-        assert_eq!(
-            parse_command(r#"!issues resolve """#),
-            Some(Command::Resolve { comment: None })
-        );
-    }
-
-    #[test]
-    fn parse_unrelated_message() {
-        assert_eq!(parse_command("hello world"), None);
-    }
-
-    #[test]
-    fn parse_unknown_subcommand() {
-        assert_eq!(parse_command("!issues unknown"), None);
-    }
-
-    #[test]
-    fn parse_with_leading_whitespace() {
-        assert_eq!(
-            parse_command("  !issues resolve  "),
-            Some(Command::Resolve { comment: None })
-        );
-    }
 }

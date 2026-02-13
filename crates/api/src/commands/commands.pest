@@ -1,0 +1,15 @@
+WHITESPACE = _{ " " | "\t" }
+
+command = { SOI ~ "!issues" ~ subcommand ~ EOI }
+
+subcommand = { resolve }
+
+resolve = { "resolve" ~ comment? }
+
+comment = { quoted_comment | unquoted_comment }
+
+quoted_comment = ${ "\"" ~ quoted_inner ~ "\"" }
+quoted_inner   = @{ (!("\"") ~ ANY)* }
+
+unquoted_comment = @{ (!NEWLINE ~ ANY)+ }
+
